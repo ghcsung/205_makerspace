@@ -1,0 +1,104 @@
+---
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<!-- ## R Markdown -->
+
+<!-- Visualizing Social Network Data from Makerspaces -->
+
+```{r cars, echo=FALSE, results=FALSE, message=FALSE, warning=FALSE}
+library('visNetwork')
+library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(plotly)
+```
+
+
+```{r functions, echo=FALSE, results=FALSE, message=FALSE, warning=FALSE}
+nodes <- function(data) {
+  nodes <- data %>%
+    group_by(name) %>%
+    mutate(n_interactions = n()) %>%
+    mutate(value = as.integer(n()/10)+1) %>%
+    slice(1) %>%
+    ungroup() %>%
+    mutate(label = name) %>%
+    rename(group = identity) %>%
+    select(label, group, value, n_interactions) %>%
+    mutate(id = row_number())
+  return(nodes)
+}
+
+edges <- function(data, nodes) {
+  edges <- data %>%
+  mutate(to = as.character(interaction)) %>%
+  mutate(to = strsplit(to, " ")) %>%
+  unnest(to) %>%
+  mutate(from = name) %>%
+  mutate(label = from) %>%
+  group_by(from, to, label) %>%
+  summarise() %>%
+  ungroup() %>%
+  inner_join(nodes, by="label") %>%
+  mutate(label = to)
+  inner_join(nodes, by="label") %>%
+  select(id.x, id.y) %>%
+  rename(from = id.x) %>%
+  rename(to = id.y)
+  return(edges)
+}
+
+'%ni%' <- Negate('%in%')
+
+delete_duplicates <- function(edges) {
+  counted = c()
+  new_edges <- data.frame()
+  for(i in 1:nrow(edges)){
+    row <- edges[i,]
+    if(row$to %ni% counted){
+      new_edges <- rbind(new_edges, row)
+    }
+    counted <- append(counted, row$from)
+  }
+  return(new_edges)
+}
+
+```
+
+```{r wrangle data, echo=FALSE, results=FALSE, message=FALSE, warning=FALSE}
+setwd("~/Downloads")
+daily_data <- read.csv("df_daily_interaction.csv")
+
+day_data <- daily_data %>%
+  filter(date == "2/14/19") 
+
+day_nodes <- nodes(day_data)
+write.csv(day_nodes, "./day_nodes.csv")
+day_edges <- edges(day_data, day_nodes)
+day_edges <- delete_duplicates(day_edges)
+
+```
+
+## Social Network Visualization
+
+Social Network of Instructors, Students and Tools on 2.14.2019:
+```{r visualize network, echo=FALSE}
+
+visNetwork(day_nodes, day_edges, width = "100%", height="500px") %>%
+  visGroups(groupname = "Student", color = "#9986A5") %>%
+  visGroups(groupname = "Instructor", color = "#79402E") %>%
+  visGroups(groupname = "Tool", color = "#CCBA72") %>%
+  visOptions(selectedBy = "group",
+             highlightNearest = TRUE,
+             nodesIdSelection = TRUE) %>% 
+  visPhysics(solver = "forceAtlas2Based",forceAtlas2Based = list(gravitationalConstant = -100)) %>%
+  visSave(file = "network.html")
+```
+
+
+
