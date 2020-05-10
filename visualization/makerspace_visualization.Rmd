@@ -20,6 +20,7 @@ library(plotly)
 
 
 ```{r functions, echo=FALSE, results=FALSE, message=FALSE, warning=FALSE}
+#generate individual agent nodes from dataset
 nodes <- function(data) {
   nodes <- data %>%
     group_by(name) %>%
@@ -34,6 +35,7 @@ nodes <- function(data) {
   return(nodes)
 }
 
+#generate edges of interactions between nodes, label with id 
 edges <- function(data, nodes) {
   edges <- data %>%
   mutate(to = as.character(interaction)) %>%
@@ -55,6 +57,7 @@ edges <- function(data, nodes) {
 
 '%ni%' <- Negate('%in%')
 
+#delete duplicate edges
 delete_duplicates <- function(edges) {
   counted = c()
   new_edges <- data.frame()
@@ -78,7 +81,6 @@ day_data <- daily_data %>%
   filter(date == "2/14/19") 
 
 day_nodes <- nodes(day_data)
-write.csv(day_nodes, "./day_nodes.csv")
 day_edges <- edges(day_data, day_nodes)
 day_edges <- delete_duplicates(day_edges)
 
