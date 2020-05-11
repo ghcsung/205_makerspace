@@ -9,7 +9,7 @@ import numpy as np
 import itertools
 import cv2
 import sys
-
+from multiprocessing.pool import ThreadPool
 #####################################################################################################
 
 # Helper Functions & Variables
@@ -44,7 +44,6 @@ def cv2_homography(src_array, dst_array, x_data, z_data):
     except:
         print("Unexpected error:", sys.exc_info())
 
-
 #####################################################################################################
         
 # Homography  
@@ -54,25 +53,37 @@ conf_homo = SparkConf().setAppName('HomoStreaming').set("spark.sql.streaming.sch
 sc_homo = SparkContext(conf = conf_homo)
 spark_homo = SparkSession(sc_homo)
 
+# Calibration file for homography (to be placed in Hadoop filesystem)
+calibration = spark_homo.read.format("csv").option("header", "true").option("inferschema", "true").load("calibration.csv") 
+calibration.persist()
+
 # Create a DStream that monitors Hadoop data directory for csv files
 df_raw = spark_homo.readStream.option("header", "true").option("inferschema", "true").csv("data")
 
-# Calibration file for homography (to be placed in Hadoop filesystem)
-calibration = spark_homo.read.format("csv").option("header", "true").option("inferschema", "true").load("calibration.csv") 
+# Convert timestamp column to timestamp type
+df_raw = df_raw.withColumn("new_timestamp", to_timestamp(col("timestamp")))
 
-# Join files
-calibration.persist()
+# Create window operation
+df_raw = df_raw.select(window(df_raw.new_timestamp, "30 minutes", "5 minutes"),"*")
+
+#####################################################################################################
+        
+# Homography  
+
 df_raw = df_raw.join(calibration, "kinect_id")
 
 # change string values to array
-df_raw = df_raw.withColumn("src_array", split(col("src"), " ").alias("src"))
-df_raw = df_raw.withColumn("dst_array", split(col("dst"), " ").alias("dst"))
+df_raw = df_raw.withColumn("src_array", split(col("src"), " ").cast("array<double>").alias("src"))
+df_raw = df_raw.withColumn("dst_array", split(col("dst"), " ").cast("array<double>").alias("dst"))
     
 hmg_udf = udf(cv2_homography, ArrayType(DoubleType()))
 df_homo = df_raw.withColumn('xz', hmg_udf(df_raw.src_array, df_raw.dst_array, df_raw.Head_x, df_raw.Head_z))
 df_homo = df_homo.withColumn('Head_x_homography', df_homo.xz[0]).withColumn('Head_z_homography', df_homo.xz[1])
 cols = ['timestamp', 'person_id', 'person_name', 'Head_x_homography', 'Head_z_homography']
 df_homo = df_homo.select(*cols)
+
+# Round minute from timestamp
+df_homo = df_homo.withColumn('minute', df_homo['timestamp'].substr(0, 16))
 
 # Write output to screen for easy debugging
 #homo_query = df_homo.writeStream.format("console").start()  

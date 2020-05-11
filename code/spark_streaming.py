@@ -3,13 +3,13 @@
 from pyspark import SparkConf, SparkContext
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
-from pyspark.sql.functions import udf, split, col, window, to_timestamp
+from pyspark.sql.functions import udf, split, col
 from pyspark.sql.types import *
 import numpy as np
 import itertools
 import cv2
 import sys
-
+from multiprocessing.pool import ThreadPool
 #####################################################################################################
 
 # Helper Functions & Variables
@@ -35,7 +35,7 @@ def cv2_homography(src_array, dst_array, x_data, z_data):
     src_pts = src_pts.reshape(9,2)
     dst_pts = np.array(dst_array)
     dst_pts = dst_pts.reshape(9,2)
-    
+
     try:
         M,mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
         # find the location of the second gaze
@@ -54,25 +54,25 @@ def map_distance(x1,y1,x2,y2):
 
 # Function to create interation list    
 def func(Personlist, HeadXlist, HeadYlist):
-    
     if (len(Personlist)==1):
         return []
     else:
         pairs = list(itertools.combinations(Personlist,2))
-        interaction_list =[]
-        for pair in pairs:
+        pool = ThreadPool(5)
+        
+        def distance_get(pair):
             first_person_idx =Personlist.index(pair[0])
             second_person_idx =Personlist.index(pair[1])
-            print(first_person_idx)
-            print(second_person_idx)
-            if(map_distance(HeadXlist[first_person_idx],HeadYlist[first_person_idx],HeadXlist[second_person_idx],HeadYlist[second_person_idx])<dist):
-                interaction_list.append(list(pair))
-        return interaction_list
+            if map_distance(HeadXlist[first_person_idx],HeadYlist[first_person_idx],HeadXlist[second_person_idx],HeadYlist[second_person_idx]) < 15:
+                return list(pair)        
+        return pool.map(distance_get, pairs)
+    
+    
 
 #####################################################################################################
         
 # Create a Spark Session
-conf = SparkConf().setAppName('DataStreaming').set("spark.sql.streaming.schemaInference", "true").set("spark.dynamicAllocation.enabled", "false")
+conf = SparkConf().setAppName('DataStreaming').set("spark.sql.streaming.schemaInference", "true")
 sc = SparkContext(conf = conf)
 spark = SparkSession(sc)
 
@@ -90,21 +90,20 @@ df_raw = df_raw.withColumn("new_timestamp", to_timestamp(col("timestamp")))
 df_raw = df_raw.select(window(df_raw.new_timestamp, "30 minutes", "5 minutes"),"*")
 
 #####################################################################################################
-    
+        
 # Homography  
 
 df_raw = df_raw.join(calibration, "kinect_id")
 
 # change string values to array
-df_raw = df_raw.withColumn("src_array", split(col("src"), "\ "))
-df_raw = df_raw.withColumn("dst_array", split(col("dst"), "\ "))
+df_raw = df_raw.withColumn("src_array", split(col("src"), " ").cast("array<double>").alias("src"))
+df_raw = df_raw.withColumn("dst_array", split(col("dst"), " ").cast("array<double>").alias("dst"))
     
-hmg_udf = udf(cv2_homography, ArrayType(FloatType()))
-df_raw = df_raw.withColumn('xz', hmg_udf(df_raw.src_array, df_raw.dst_array, df_raw.Head_x, df_raw.Head_z))
-df_raw = df_raw.withColumn('Head_x_homography', df_raw.xz[0]).withColumn('Head_z_homography', df_raw.xz[1])
+hmg_udf = udf(cv2_homography, ArrayType(DoubleType()))
+df_homo = df_raw.withColumn('xz', hmg_udf(df_raw.src_array, df_raw.dst_array, df_raw.Head_x, df_raw.Head_z))
+df_homo = df_homo.withColumn('Head_x_homography', df_homo.xz[0]).withColumn('Head_z_homography', df_homo.xz[1])
 cols = ['timestamp', 'person_id', 'person_name', 'Head_x_homography', 'Head_z_homography']
-
-df_raw = df_raw.select(*cols)
+df_homo = df_homo.select(*cols)
 
 # Round minute from timestamp
 df_raw = df_raw.withColumn('minute', df_raw['timestamp'].substr(0, 16))
@@ -112,6 +111,7 @@ df_raw = df_raw.withColumn('minute', df_raw['timestamp'].substr(0, 16))
 #####################################################################################################
 
 # Social interaction analysis
+
 
 # Define foreach_batch_function for aggregate computations
 def foreach_batch_function(df_raw, epoch_id):

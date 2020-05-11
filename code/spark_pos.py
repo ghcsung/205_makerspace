@@ -9,7 +9,7 @@ import numpy as np
 import itertools
 import cv2
 import sys
-
+from multiprocessing.pool import ThreadPool
 #####################################################################################################
 
 # Helper Functions & Variables
@@ -24,20 +24,19 @@ def map_distance(x1,y1,x2,y2):
 
 # Function to create interation list    
 def func(Personlist, HeadXlist, HeadYlist):
-    
     if (len(Personlist)==1):
         return []
     else:
         pairs = list(itertools.combinations(Personlist,2))
-        interaction_list =[]
-        for pair in pairs:
+        pool = ThreadPool(5)
+        
+        def distance_get(pair):
             first_person_idx =Personlist.index(pair[0])
             second_person_idx =Personlist.index(pair[1])
-            print(first_person_idx)
-            print(second_person_idx)
-            if(map_distance(HeadXlist[first_person_idx],HeadYlist[first_person_idx],HeadXlist[second_person_idx],HeadYlist[second_person_idx])<dist):
-                interaction_list.append(list(pair))
-        return interaction_list
+            if map_distance(HeadXlist[first_person_idx],HeadYlist[first_person_idx],HeadXlist[second_person_idx],HeadYlist[second_person_idx]) < 15:
+                return list(pair)        
+        return pool.map(distance_get, pairs)
+    
 
 #####################################################################################################
 
