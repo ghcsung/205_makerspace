@@ -3,7 +3,7 @@
 from pyspark import SparkConf, SparkContext
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
-from pyspark.sql.functions import udf, split, col
+from pyspark.sql.functions import udf, split, col, to_timestamp, window
 from pyspark.sql.types import *
 import numpy as np
 import itertools
@@ -106,7 +106,7 @@ cols = ['timestamp', 'person_id', 'person_name', 'Head_x_homography', 'Head_z_ho
 df_homo = df_homo.select(*cols)
 
 # Round minute from timestamp
-df_raw = df_raw.withColumn('minute', df_raw['timestamp'].substr(0, 16))
+df_raw = df_homo.withColumn('minute', df_homo['timestamp'].substr(0, 16))
 
 #####################################################################################################
 
